@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>Local WebLLM AI Chat</title>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+    #chat-log { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
+    textarea { width: 100%; height: 60px; }
+    button { padding: 10px 20px; }
+  </style>
+</head>
+<body>
+  <h2>完全ローカル動作 Wasm/WebGPU AI Chat</h2>
+  <div id="status">モデルの準備中...（初回のみダウンロードが発生します）</div>
+  <div id="chat-log"></div>
+  
+  <textarea id="user-input" placeholder="メッセージを入力..."></textarea><br>
+  <button id="send-btn" disabled>送信</button>
+
+  <!-- WebLLMの読み込み -->
+  <script type="module">
+    import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+
+    // 軽量で高性能なモデルを選択（例: Qwen2.5-0.5B-Instruct や Llama-3.2-1B-Instruct）
+    const selectedModel = "Qwen2.5-0.5B-Instruct-q4f16_1-MLC";
+    
+    const statusDiv = document.getElementById("status");
+    const chatLog = document.getElementById("chat-log");
+    const userInput = document.getElementById("user-input");
+    const sendBtn = document.getElementById("send-btn");
+
+    let engine;
+
+    async function initEngine() {
+      // 進捗コールバック
+      const initProgressCallback = (report) => {
+        statusDiv.innerText = report.text;
+      };
+
+      // Wasm & WebGPU エンジンの初期化
+      engine = await webllm.CreateMLCEngine(selectedModel, {
+        initProgressCallback: initProgressCallback,
+      });
+
+      statusDiv.innerText = "準備完了（以降はオフラインで利用可能です）";
+      sendBtn.disabled = false;
+    }
+
+    sendBtn.addEventListener("click", async () => {
+      const text = userInput.value;
+      if (!text) return;
+
+      chatLog.innerHTML += `<div><strong>User:</strong> ${text}</div>`;
+      userInput.value = "";
+      sendBtn.disabled = true;
+
+      const messages = [{ role: "user", content: text }];
+      
+      // ストリーミング出力の処理
+      const chunks = await engine.chat.completions.create({
+        messages,
+        stream: true,
+      });
+
+      let aiResponse = "";
+      const aiResponseNode = document.createElement("div");
+      aiResponseNode.innerHTML = `<strong>AI:</strong> `;
+      chatLog.appendChild(aiResponseNode);
+
+      for await (const chunk of chunks) {
+        const delta = chunk.choices[0]?.delta?.content || "";
+        aiResponse += delta;
+        aiResponseNode.innerHTML = `<strong>AI:</strong> ${aiResponse}`;
+        chatLog.scrollTop = chatLog.scrollHeight;
+      }
+
+      sendBtn.disabled = false;
+    });
+
+    initEngine().catch(err => {
+      statusDiv.innerText = "エラーが発生しました: " + err.message;
+    });
+  </script>
+</body>
+</html>
